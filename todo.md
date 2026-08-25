@@ -5,6 +5,7 @@
 - [x] Add a deterministic metadata-analysis pipeline and baseline-learning logic for uploaded captures.
 - [x] Connect the dashboard to capture selection, learning progress, analysis results, and anomaly detail.
 - [ ] Validate upload, learning, replay, empty, and failure states end to end.
+- [ ] Make the PCAP picker directly operable for browser-based upload validation.
 - [x] Implement deferred PCAP analysis with persisted progress and analysis-state polling.
 - [x] Add analysis failure recovery and retry controls for uploaded captures.
 - [x] Replace the in-process analysis timer with a durable database-backed analysis job workflow.
