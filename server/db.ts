@@ -96,6 +96,12 @@ export async function getWorkerSettingsByTaskUid(taskUid: string) {
   return rows[0];
 }
 
+export async function setProcessorHeartbeat(taskUid: string) {
+  const db = await getDb();
+  if (!db) throw new Error("PacketMind database is unavailable.");
+  await db.update(workerSettings).set({ scheduleCronTaskUid: taskUid, enabled: 1 }).where(eq(workerSettings.workerName, "packetmind-pcap-processor"));
+}
+
 function asRecord(value: Record<string, unknown> | null | undefined) { return value ?? {}; }
 
 export async function createCapture(input: Pick<Capture, "userId" | "filename" | "networkLabel" | "storageKey" | "storageUrl" | "byteSize" | "mode">) {

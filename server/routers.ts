@@ -1,8 +1,10 @@
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
+import { parse as parseCookie } from "cookie";
 import { z } from "zod";
+import { createHeartbeatJob } from "./_core/heartbeat";
 import { getSessionCookieOptions } from "./_core/cookies";
-import { createAnalysisRun, createCapture, getLatestBaseline, getNetworkDashboard, retryAnalysisRun } from "./db";
+import { createAnalysisRun, createCapture, getLatestBaseline, getNetworkDashboard, retryAnalysisRun, setProcessorHeartbeat } from "./db";
 import { storagePut } from "./storage";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -41,6 +43,18 @@ export const appRouter = router({
     retry: protectedProcedure.input(z.object({ analysisId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const record = await retryAnalysisRun(input.analysisId, ctx.user.id);
       return { analysisId: record.run.id, status: "queued" as const };
+    }),
+    provisionProcessor: protectedProcedure.mutation(async ({ ctx }) => {
+      const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
+      if (!sessionToken) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in again before activating the PacketMind processor." });
+      const job = await createHeartbeatJob({
+        name: `packetmind-pcap-processor-${ctx.user.id}`,
+        cron: "0 * * * * *",
+        path: "/api/scheduled/processPcapQueue",
+        description: "Process one queued PacketMind PCAP analysis with durable progress updates",
+      }, sessionToken);
+      await setProcessorHeartbeat(job.taskUid);
+      return job;
     }),
   }),
 });
