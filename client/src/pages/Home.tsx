@@ -3,6 +3,9 @@
  * field, Signal Amber exception cues, and cyan packet-path telemetry.
  */
 import { toast } from "sonner";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
+import { trpc } from "@/lib/trpc";
 import {
   Activity,
   AlertTriangle,
@@ -33,7 +36,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -206,14 +209,81 @@ function NetworkGraph({ live, selectedHost, onHostSelect }: { live: boolean; sel
 }
 
 export default function Home() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  const utils = trpc.useUtils();
+  const [polling, setPolling] = useState(false);
+  const dashboardQuery = trpc.network.dashboard.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: polling ? 1200 : false });
+  const uploadMutation = trpc.network.uploadAndAnalyze.useMutation({
+    onSuccess: async (result) => {
+      await utils.network.dashboard.invalidate();
+      setPolling(true);
+      toast.success(result.baselineUsed ? "Comparison queued" : "Baseline learning queued", { description: "PacketMind is analyzing metadata in the background. This view will update automatically." });
+    },
+    onError: (error) => toast.error("PCAP analysis could not start", { description: error.message }),
+  });
+  const retryMutation = trpc.network.retry.useMutation({
+    onSuccess: async () => { await utils.network.dashboard.invalidate(); setPolling(true); toast.success("Analysis restarted", { description: "PacketMind is retrying this stored capture." }); },
+    onError: (error) => toast.error("Retry could not start", { description: error.message }),
+  });
   const [range, setRange] = useState<Range>("24H");
   const [liveCapture, setLiveCapture] = useState(true);
   const [selectedAnomalyId, setSelectedAnomalyId] = useState("AN-0482");
   const [selectedHost, setSelectedHost] = useState("10.14.8.23");
   const [replay, setReplay] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadMode, setUploadMode] = useState<"learn" | "compare">("learn");
+  const [networkLabel, setNetworkLabel] = useState("Production / us-east-1");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const metric = rangeMetrics[range];
-  const selectedAnomaly = useMemo(() => anomalies.find((item) => item.id === selectedAnomalyId) ?? anomalies[0], [selectedAnomalyId]);
+  const dashboard = dashboardQuery.data;
+  const liveSummary = dashboard?.latest?.run.summary;
+  const hasBaseline = dashboard?.captures.some((capture) => capture.mode === "learn" && capture.status === "ready") ?? false;
+  const actualAnomalies = useMemo<Anomaly[]>(() => (dashboard?.anomalies ?? []).map((item) => ({
+    id: `AN-${String(item.id).padStart(4, "0")}`,
+    time: new Date(item.seenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    title: item.title,
+    source: item.sourceHost,
+    target: item.target,
+    score: item.score / 100,
+    severity: item.severity as Severity,
+    explanation: item.explanation,
+    evidence: item.evidence,
+  })), [dashboard?.anomalies]);
+  const displayedAnomalies = actualAnomalies.length ? actualAnomalies : anomalies;
+  const selectedAnomaly = useMemo(() => displayedAnomalies.find((item) => item.id === selectedAnomalyId) ?? displayedAnomalies[0], [displayedAnomalies, selectedAnomalyId]);
+  const formatBytes = (value: number) => value >= 1_000_000_000 ? `${(value / 1_000_000_000).toFixed(2)} GB` : value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)} MB` : value >= 1_000 ? `${(value / 1_000).toFixed(1)} KB` : `${value} B`;
+  const totalBytes = Number(liveSummary?.totalBytes ?? 0);
+  const totalHosts = Number(liveSummary?.totalHosts ?? 0);
+  const totalFlows = Number(liveSummary?.totalFlows ?? 0);
+  const analysisStage = dashboard?.latest?.run.stage ?? null;
+  const analysisProgress = Number(dashboard?.latest?.run.progress ?? 0);
+  const stageLabel = analysisStage ? ({ queued: "Queued for analysis", parsing: "Parsing packet headers", learning: "Learning baseline behavior", detecting: "Scoring deviations", complete: "Analysis complete", failed: "Analysis failed" }[analysisStage] ?? "Analyzing capture") : null;
+
+  useEffect(() => {
+    if (dashboard?.latest?.run.status && dashboard.latest.run.status !== "analyzing") setPolling(false);
+  }, [dashboard?.latest?.run.status]);
+
+  const openUpload = () => {
+    if (!isAuthenticated) { startLogin(); return; }
+    setUploadOpen(true);
+  };
+
+  const submitUpload = async () => {
+    if (!selectedFile) { toast.error("Select a capture first", { description: "Choose a classic .pcap or .cap file to begin." }); return; }
+    if (!/\.(pcap|cap)$/i.test(selectedFile.name)) { toast.error("Unsupported capture format", { description: "Export the source as a classic .pcap or .cap file." }); return; }
+    if (selectedFile.size > 20 * 1024 * 1024) { toast.error("Capture is too large", { description: "This browser upload workflow supports PCAP files up to 20 MB." }); return; }
+    const base64Content = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+      reader.onerror = () => reject(new Error("The capture could not be read in this browser."));
+      reader.readAsDataURL(selectedFile);
+    });
+    await uploadMutation.mutateAsync({ filename: selectedFile.name, networkLabel, mode: uploadMode, base64Content });
+    setUploadOpen(false);
+    setSelectedFile(null);
+  };
 
   useEffect(() => {
     if (replay <= 0 || replay >= 100) return;
@@ -230,8 +300,7 @@ export default function Home() {
 
   const selectHost = (host: string) => {
     setSelectedHost(host);
-    const related = host === "10.14.22.61" ? "AN-0473" : host === "185.199.110.153" ? "AN-0482" : "AN-0482";
-    setSelectedAnomalyId(related);
+    setSelectedAnomalyId(displayedAnomalies.find((item) => item.source === host || item.target.includes(host))?.id ?? displayedAnomalies[0].id);
   };
 
   const toggleCapture = () => {
@@ -256,7 +325,7 @@ export default function Home() {
               <span className="panel-label text-[9px]">Environment</span>
               <ChevronDown className="h-3 w-3 text-slate-500" />
             </div>
-            <div className="flex items-center gap-2 text-[12px] font-semibold text-slate-200"><span className="h-1.5 w-1.5 rounded-full bg-[#79dce0]" />Production / us-east-1</div>
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-slate-200"><span className="h-1.5 w-1.5 rounded-full bg-[#79dce0]" />{dashboard?.latest?.capture.networkLabel ?? "Production / us-east-1"}</div>
           </div>
 
           <nav className="space-y-5">
@@ -294,22 +363,22 @@ export default function Home() {
               </div>
               <button onClick={() => setSearchOpen(true)} className="hidden h-8 items-center gap-2 rounded-md border border-white/[0.08] bg-white/[0.025] px-2.5 text-[11px] text-slate-500 transition-colors hover:border-white/[0.15] hover:text-slate-300 md:flex"><Search className="h-3.5 w-3.5" />Search <span className="ml-3 rounded border border-white/10 px-1 font-mono text-[9px]">⌘ K</span></button>
               <button onClick={() => toast("Notification center", { description: "You have 2 new anomaly notifications." })} aria-label="Open notifications" className="relative grid h-8 w-8 place-items-center rounded-md border border-white/[0.08] bg-white/[0.025] text-slate-400 transition-colors hover:text-slate-200"><BellRing className="h-3.5 w-3.5" /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#f6b73c]" /></button>
-              <button onClick={toggleCapture} className={`flex h-8 items-center gap-2 rounded-md px-3 text-[11px] font-semibold transition-all active:scale-[.97] ${liveCapture ? "bg-[#79dce0] text-[#102028] hover:bg-[#95e8eb]" : "bg-slate-700 text-slate-100 hover:bg-slate-600"}`}><Radio className={`h-3.5 w-3.5 ${liveCapture ? "live-pulse" : ""}`} />{liveCapture ? "Live capture" : "Capture paused"}</button>
+              <button onClick={openUpload} className="flex h-8 items-center gap-2 rounded-md bg-[#f6b73c] px-3 text-[11px] font-semibold text-[#201705] transition-all hover:bg-[#ffd16a] active:scale-[.97]"><Upload className="h-3.5 w-3.5" />Upload PCAP</button>
             </div>
           </header>
 
           <div className="mx-auto max-w-[1700px] px-5 py-5 lg:px-7 lg:py-6">
             <section className="mb-5 flex flex-col justify-between gap-3 xl:flex-row xl:items-center">
               <div className="flex flex-wrap gap-3">
-                <MetricCard label="Traffic observed / 24H" value={metric.traffic} detail={metric.trafficDelta} accent="cyan" icon={ArrowUpRight} />
-                <MetricCard label="Active hosts / NOW" value={metric.hosts} detail="+18 now" icon={Globe2} />
-                <MetricCard label="Anomalies / 24H" value={metric.anomalies} detail="3 critical" accent="amber" icon={AlertTriangle} />
-                <MetricCard label="Baseline fit / 30D" value={metric.signal} detail="high confidence" accent="cyan" icon={CircleDotDashed} />
+                <MetricCard label="Traffic observed / 24H" value={totalBytes ? formatBytes(totalBytes) : metric.traffic} detail={totalBytes ? "capture total" : metric.trafficDelta} accent="cyan" icon={ArrowUpRight} />
+                <MetricCard label="Active hosts / NOW" value={totalHosts ? String(totalHosts) : metric.hosts} detail={totalHosts ? "from PCAP" : "+18 now"} icon={Globe2} />
+                <MetricCard label="Anomalies / 24H" value={actualAnomalies.length ? String(actualAnomalies.length).padStart(2, "0") : metric.anomalies} detail={actualAnomalies.length ? "in analysis" : "3 critical"} accent="amber" icon={AlertTriangle} />
+                <MetricCard label="Baseline fit / 30D" value={hasBaseline ? "LEARNED" : metric.signal} detail={hasBaseline ? "ready to compare" : "high confidence"} accent="cyan" icon={CircleDotDashed} />
               </div>
               <div className="flex items-center gap-3 rounded-lg border border-[#f6b73c]/20 bg-[#f6b73c]/[0.045] px-3.5 py-2.5 xl:max-w-[348px]">
                 <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#f6b73c]/12"><ShieldAlert className="h-3.5 w-3.5 text-[#f6b73c]" /></div>
-                <p className="text-[10.5px] leading-relaxed text-slate-400"><span className="font-semibold text-slate-200">Behavior shift detected.</span> Finance workstation traffic has left its learned peer group.</p>
-                <button onClick={() => document.getElementById("anomaly-docket")?.scrollIntoView({ behavior: "smooth" })} className="font-mono text-[10px] text-[#f6b73c] hover:text-[#ffd67c]">Inspect</button>
+                <div className="min-w-0 flex-1"><p className="text-[10.5px] leading-relaxed text-slate-400"><span className="font-semibold text-slate-200">{dashboard?.latest?.run.status === "analyzing" ? `${stageLabel}.` : dashboard?.latest?.run.status === "failed" ? "Analysis needs attention." : hasBaseline ? "Baseline ready." : "Start with a PCAP."}</span> {dashboard?.latest?.run.status === "analyzing" ? "PacketMind is extracting metadata and learning traffic behavior." : dashboard?.latest?.run.status === "failed" ? (dashboard.latest.run.failureReason ?? "Retry the stored capture to resume analysis.") : hasBaseline ? `${totalFlows} captured flows can now be compared against normal traffic.` : "Upload a classic capture to learn host peers and service behavior."}</p>{dashboard?.latest?.run.status === "analyzing" && <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full rounded-full bg-[#f6b73c] transition-[width] duration-500" style={{ width: `${analysisProgress}%` }} /></div>}</div>
+                {dashboard?.latest?.run.status === "failed" ? <button onClick={() => retryMutation.mutate({ analysisId: dashboard.latest!.run.id })} className="font-mono text-[10px] text-[#f6b73c] hover:text-[#ffd67c]">Retry</button> : <button onClick={hasBaseline ? () => document.getElementById("anomaly-docket")?.scrollIntoView({ behavior: "smooth" }) : openUpload} className="font-mono text-[10px] text-[#f6b73c] hover:text-[#ffd67c]">{dashboard?.latest?.run.status === "analyzing" ? "Working" : hasBaseline ? "Inspect" : "Upload"}</button>}
               </div>
             </section>
 
@@ -325,7 +394,7 @@ export default function Home() {
               <aside id="anomaly-docket" className="instrument-panel enter-stagger overflow-hidden rounded-xl" style={{ animationDelay: "60ms" }}>
                 <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4"><div><div className="mb-1.5 flex gap-2"><span className="panel-label">Anomaly docket</span><span className="measurement-id">Q / 017</span></div><h2 className="text-[14px] font-bold tracking-[-0.03em]">Three deviations need inspection</h2></div><span className="grid h-6 w-6 place-items-center rounded-md border border-white/[0.08] text-[10px] font-semibold text-slate-400">17</span></div>
                 <div className="max-h-[281px] overflow-y-auto scroll-thin">
-                  {anomalies.map((item) => <button key={item.id} onClick={() => { setSelectedAnomalyId(item.id); setSelectedHost(item.source); }} className={`anomaly-bracket w-full border-b border-white/[0.06] px-5 py-3 text-left transition-colors ${selectedAnomalyId === item.id ? "bg-white/[0.055]" : "hover:bg-white/[0.025]"}`}><div className="flex gap-2.5"><SeverityDot severity={item.severity} /><div className="min-w-0 flex-1"><div className="mb-1 flex items-center justify-between gap-2"><span className="truncate text-[11px] font-semibold text-slate-200">{item.title}</span><span className="font-mono text-[9px] text-slate-500">{item.time}</span></div><div className="flex items-center justify-between gap-3"><span className="truncate font-mono text-[9px] text-slate-500">{item.source}</span><span className="font-mono text-[9px] text-[#f6b73c]">{item.score.toFixed(2)}</span></div></div></div></button>)}
+                  {displayedAnomalies.map((item) => <button key={item.id} onClick={() => { setSelectedAnomalyId(item.id); setSelectedHost(item.source); }} className={`anomaly-bracket w-full border-b border-white/[0.06] px-5 py-3 text-left transition-colors ${selectedAnomalyId === item.id ? "bg-white/[0.055]" : "hover:bg-white/[0.025]"}`}><div className="flex gap-2.5"><SeverityDot severity={item.severity} /><div className="min-w-0 flex-1"><div className="mb-1 flex items-center justify-between gap-2"><span className="truncate text-[11px] font-semibold text-slate-200">{item.title}</span><span className="font-mono text-[9px] text-slate-500">{item.time}</span></div><div className="flex items-center justify-between gap-3"><span className="truncate font-mono text-[9px] text-slate-500">{item.source}</span><span className="font-mono text-[9px] text-[#f6b73c]">{item.score.toFixed(2)}</span></div></div></div></button>)}
                 </div>
                 <div className="relative overflow-hidden border-t border-white/[0.07] bg-[#12171d] px-5 py-4">
                   <div className="absolute inset-0 bg-cover bg-right opacity-[0.11]" style={{ backgroundImage: "url('/manus-storage/packetmind-telemetry-hero_28b995f3.png')" }} />
@@ -353,15 +422,15 @@ export default function Home() {
 
             <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,.55fr)]">
               <div className="instrument-panel enter-stagger overflow-hidden rounded-xl" style={{ animationDelay: "220ms" }}>
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-4"><div><div className="mb-1.5 flex gap-2"><span className="panel-label">Latest detections</span><span className="measurement-id">EV / 17</span></div><h2 className="text-[14px] font-bold tracking-[-0.03em]">Evidence ledger for active deviations</h2></div><button onClick={() => toast("All detections", { description: "A full detection table would open here." })} className="font-mono text-[10px] text-slate-500 hover:text-[#79dce0]">View all 17 <ArrowUpRight className="ml-1 inline h-3 w-3" /></button></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[630px] text-left"><thead className="border-b border-white/[0.05]"><tr className="font-mono text-[9px] uppercase tracking-[0.12em] text-slate-600"><th className="px-5 py-3 font-medium">Detection</th><th className="px-3 py-3 font-medium">Path</th><th className="px-3 py-3 font-medium">Evidence</th><th className="px-5 py-3 text-right font-medium">Score</th></tr></thead><tbody>{anomalies.map((item) => <tr key={item.id} onClick={() => { setSelectedAnomalyId(item.id); setSelectedHost(item.source); }} className={`cursor-pointer border-b border-white/[0.045] text-[10.5px] transition-colors last:border-0 ${selectedAnomalyId === item.id ? "bg-white/[0.04]" : "hover:bg-white/[0.025]"}`}><td className="px-5 py-3.5"><div className="mb-0.5 flex items-center gap-2"><SeverityDot severity={item.severity} /><span className="font-semibold text-slate-300">{item.title}</span></div><span className="font-mono text-[9px] text-slate-600">{item.id} · {item.time}</span></td><td className="px-3 py-3.5 font-mono text-[9px] text-slate-500"><span className="text-slate-400">{item.source}</span><br />{item.target}</td><td className="px-3 py-3.5"><span className="rounded bg-white/[0.045] px-1.5 py-1 font-mono text-[8.5px] text-slate-500">{item.evidence[0]}</span></td><td className="px-5 py-3.5 text-right"><span className={`font-mono text-[11px] ${item.severity === "critical" ? "text-[#f16f62]" : item.severity === "elevated" ? "text-[#f6b73c]" : "text-[#79dce0]"}`}>{item.score.toFixed(2)}</span></td></tr>)}</tbody></table></div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-4"><div><div className="mb-1.5 flex gap-2"><span className="panel-label">Latest detections</span><span className="measurement-id">EV / {String(displayedAnomalies.length).padStart(2, "0")}</span></div><h2 className="text-[14px] font-bold tracking-[-0.03em]">Evidence ledger for active deviations</h2></div><button onClick={openUpload} className="font-mono text-[10px] text-slate-500 hover:text-[#79dce0]">Analyze another PCAP <ArrowUpRight className="ml-1 inline h-3 w-3" /></button></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[630px] text-left"><thead className="border-b border-white/[0.05]"><tr className="font-mono text-[9px] uppercase tracking-[0.12em] text-slate-600"><th className="px-5 py-3 font-medium">Detection</th><th className="px-3 py-3 font-medium">Path</th><th className="px-3 py-3 font-medium">Evidence</th><th className="px-5 py-3 text-right font-medium">Score</th></tr></thead><tbody>{displayedAnomalies.map((item) => <tr key={item.id} onClick={() => { setSelectedAnomalyId(item.id); setSelectedHost(item.source); }} className={`cursor-pointer border-b border-white/[0.045] text-[10.5px] transition-colors last:border-0 ${selectedAnomalyId === item.id ? "bg-white/[0.04]" : "hover:bg-white/[0.025]"}`}><td className="px-5 py-3.5"><div className="mb-0.5 flex items-center gap-2"><SeverityDot severity={item.severity} /><span className="font-semibold text-slate-300">{item.title}</span></div><span className="font-mono text-[9px] text-slate-600">{item.id} · {item.time}</span></td><td className="px-3 py-3.5 font-mono text-[9px] text-slate-500"><span className="text-slate-400">{item.source}</span><br />{item.target}</td><td className="px-3 py-3.5"><span className="rounded bg-white/[0.045] px-1.5 py-1 font-mono text-[8.5px] text-slate-500">{item.evidence[0]}</span></td><td className="px-5 py-3.5 text-right"><span className={`font-mono text-[11px] ${item.severity === "critical" ? "text-[#f16f62]" : item.severity === "elevated" ? "text-[#f6b73c]" : "text-[#79dce0]"}`}>{item.score.toFixed(2)}</span></td></tr>)}</tbody></table></div>
               </div>
 
               <div className="instrument-panel enter-stagger relative overflow-hidden rounded-xl p-5" style={{ animationDelay: "260ms" }}>
                 <div className="absolute -right-10 -top-16 h-44 w-44 rounded-full bg-[#f6b73c]/[0.055] blur-3xl" />
-                <div className="relative"><div className="mb-1.5 flex items-center gap-2"><Terminal className="h-3.5 w-3.5 text-[#f6b73c]" /><span className="panel-label">Replay lab</span><span className="measurement-id">P / 05M</span></div><h2 className="mb-2 text-[14px] font-bold tracking-[-0.03em]">Test the detector against a PCAP</h2><p className="mb-4 max-w-[330px] text-[10.5px] leading-relaxed text-slate-500">Run a five-minute replay of a sandbox capture and compare surfaced outliers against the established baseline.</p>
-                  {replay > 0 ? <div className="mb-4"><div className="mb-2 flex justify-between font-mono text-[9px] text-slate-400"><span>{replay === 100 ? "ANALYSIS COMPLETE" : "REPLAYING SAMPLE"}</span><span className="text-[#f6b73c]">{replay}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]"><div className="h-full rounded-full bg-[#f6b73c] transition-[width] duration-200" style={{ width: `${replay}%` }} /></div></div> : <div className="mb-4 flex items-center gap-2 font-mono text-[9px] text-slate-500"><Database className="h-3 w-3" />malware-lab-05m.pcap · 384 MB</div>}
-                  <div className="flex items-center gap-2"><button disabled={replay > 0} onClick={() => setReplay(8)} className="flex items-center gap-2 rounded-md bg-[#f6b73c] px-3 py-2 text-[10px] font-bold text-[#201705] transition-colors hover:bg-[#ffd16a] disabled:cursor-not-allowed disabled:opacity-60"><Play className="h-3 w-3 fill-current" />{replay > 0 ? "Analyzing" : "Replay sample"}</button><button onClick={() => toast("PCAP import", { description: "File upload is represented in this prototype." })} className="grid h-8 w-8 place-items-center rounded-md border border-white/[0.09] text-slate-400 hover:bg-white/[0.05] hover:text-slate-200"><Upload className="h-3.5 w-3.5" /></button><span className="ml-auto flex items-center gap-1.5 font-mono text-[9px] text-slate-500"><Clock3 className="h-3 w-3" />5:00 sample</span></div>
+                <div className="relative"><div className="mb-1.5 flex items-center gap-2"><Terminal className="h-3.5 w-3.5 text-[#f6b73c]" /><span className="panel-label">PCAP lab</span><span className="measurement-id">P / 20MB</span></div><h2 className="mb-2 text-[14px] font-bold tracking-[-0.03em]">Teach PacketMind a new network</h2><p className="mb-4 max-w-[330px] text-[10.5px] leading-relaxed text-slate-500">Upload a classic PCAP to learn its host peers and service profile. Later captures can be compared against that stored baseline.</p>
+                  <div className="mb-4 flex items-center gap-2 font-mono text-[9px] text-slate-500"><Database className="h-3 w-3" />header metadata only · no payload stored</div>
+                  <div className="flex items-center gap-2"><button onClick={openUpload} className="flex items-center gap-2 rounded-md bg-[#f6b73c] px-3 py-2 text-[10px] font-bold text-[#201705] transition-colors hover:bg-[#ffd16a]"><Upload className="h-3 w-3" />Upload PCAP</button><button onClick={openUpload} className="grid h-8 w-8 place-items-center rounded-md border border-white/[0.09] text-slate-400 hover:bg-white/[0.05] hover:text-slate-200"><Play className="h-3.5 w-3.5" /></button><span className="ml-auto flex items-center gap-1.5 font-mono text-[9px] text-slate-500"><Clock3 className="h-3 w-3" />classic PCAP</span></div>
                 </div>
               </div>
             </section>
@@ -370,6 +439,7 @@ export default function Home() {
       </div>
 
       {searchOpen && <div role="dialog" aria-modal="true" aria-label="Search traffic" className="fixed inset-0 z-50 grid place-items-start bg-black/60 px-4 pt-24 backdrop-blur-sm" onClick={() => setSearchOpen(false)}><div className="w-full max-w-xl overflow-hidden rounded-xl border border-white/[0.12] bg-[#171c23] shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3"><Search className="h-4 w-4 text-[#79dce0]" /><input autoFocus placeholder="Find a host, service, port, or anomaly…" className="min-w-0 flex-1 bg-transparent text-[12px] text-slate-200 outline-none placeholder:text-slate-600" /><button onClick={() => setSearchOpen(false)} className="rounded border border-white/[0.1] px-1.5 py-0.5 font-mono text-[9px] text-slate-500"><X className="h-3 w-3" /></button></div><div className="p-3"><div className="mb-2 panel-label text-[9px]">Suggested hosts</div>{["10.14.8.23 · FIN-WS-023", "10.14.22.61 · DEV-WS-061", "185.199.110.153 · EXT-8443"].map((host) => <button key={host} onClick={() => { selectHost(host.split(" · ")[0]); setSearchOpen(false); }} className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[11px] text-slate-400 hover:bg-white/[0.06] hover:text-slate-200"><Command className="h-3.5 w-3.5 text-slate-600" />{host}</button>)}</div></div></div>}
+      {uploadOpen && <div role="dialog" aria-modal="true" aria-label="Upload a PCAP capture" className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !uploadMutation.isPending && setUploadOpen(false)}><div className="instrument-panel w-full max-w-[520px] overflow-hidden rounded-xl" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between border-b border-white/[0.08] px-5 py-4"><div><div className="mb-1.5 flex items-center gap-2"><Upload className="h-3.5 w-3.5 text-[#f6b73c]" /><span className="panel-label text-[#d1a856]">PCAP ingestion</span></div><h2 className="text-[16px] font-bold tracking-[-0.04em] text-slate-100">Add a network capture</h2></div><button disabled={uploadMutation.isPending} onClick={() => setUploadOpen(false)} className="grid h-7 w-7 place-items-center rounded-md border border-white/[0.08] text-slate-500 hover:bg-white/[0.06] hover:text-slate-300"><X className="h-3.5 w-3.5" /></button></div><div className="space-y-5 px-5 py-5"><div><div className="mb-2 panel-label">Run type</div><div className="grid grid-cols-2 gap-2"><button onClick={() => setUploadMode("learn")} className={`rounded-lg border p-3 text-left transition-colors ${uploadMode === "learn" ? "border-[#79dce0]/40 bg-[#79dce0]/[0.08]" : "border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05]"}`}><div className="mb-1 flex items-center gap-2 text-[11px] font-semibold text-slate-200"><CircleDotDashed className="h-3.5 w-3.5 text-[#79dce0]" />Learn normal</div><p className="text-[9.5px] leading-relaxed text-slate-500">Create a peer and service baseline from this capture.</p></button><button disabled={!hasBaseline} onClick={() => setUploadMode("compare")} className={`rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${uploadMode === "compare" ? "border-[#f6b73c]/45 bg-[#f6b73c]/[0.08]" : "border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05]"}`}><div className="mb-1 flex items-center gap-2 text-[11px] font-semibold text-slate-200"><GitBranch className="h-3.5 w-3.5 text-[#f6b73c]" />Compare capture</div><p className="text-[9.5px] leading-relaxed text-slate-500">Score the capture against your latest learned baseline.</p></button></div>{!hasBaseline && <p className="mt-2 font-mono text-[9px] text-slate-600">Learn a baseline first to unlock comparison.</p>}</div><label className="block"><span className="mb-2 block panel-label">Network label</span><input value={networkLabel} onChange={(event) => setNetworkLabel(event.target.value)} maxLength={120} className="w-full rounded-md border border-white/[0.1] bg-black/15 px-3 py-2.5 text-[11px] text-slate-200 outline-none transition-colors placeholder:text-slate-700 focus:border-[#79dce0]/50" placeholder="e.g. Finance subnet / week 1" /></label><div><span className="mb-2 block panel-label">Classic PCAP file</span><input ref={fileInputRef} type="file" accept=".pcap,.cap,application/vnd.tcpdump.pcap" className="sr-only" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} /><button onClick={() => fileInputRef.current?.click()} className="flex w-full items-center gap-3 rounded-lg border border-dashed border-white/[0.14] bg-white/[0.02] px-4 py-4 text-left transition-colors hover:border-[#79dce0]/35 hover:bg-[#79dce0]/[0.035]"><div className="grid h-8 w-8 place-items-center rounded-md bg-[#79dce0]/10"><Upload className="h-3.5 w-3.5 text-[#79dce0]" /></div><div className="min-w-0 flex-1"><div className="truncate text-[11px] font-semibold text-slate-300">{selectedFile ? selectedFile.name : "Choose a .pcap or .cap file"}</div><div className="mt-0.5 font-mono text-[9px] text-slate-600">{selectedFile ? `${formatBytes(selectedFile.size)} selected` : "Ethernet or RAW IPv4 · 20 MB maximum"}</div></div></button></div><div className="rounded-md border border-white/[0.06] bg-black/[0.14] px-3 py-2.5 font-mono text-[9px] leading-relaxed text-slate-500">PacketMind extracts flow metadata from IP/TCP/UDP headers. It does not inspect or retain application payloads in the analysis records.</div></div><div className="flex items-center justify-between border-t border-white/[0.08] px-5 py-4"><span className="font-mono text-[9px] text-slate-600">{authLoading ? "checking access…" : "authenticated workspace"}</span><button disabled={uploadMutation.isPending || !selectedFile || !networkLabel.trim()} onClick={submitUpload} className="flex items-center gap-2 rounded-md bg-[#f6b73c] px-3.5 py-2 text-[10px] font-bold text-[#201705] transition-colors hover:bg-[#ffd16a] disabled:cursor-not-allowed disabled:opacity-45">{uploadMutation.isPending ? <Activity className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5 fill-current" />}{uploadMutation.isPending ? "Analyzing capture" : uploadMode === "learn" ? "Learn baseline" : "Compare capture"}</button></div></div></div>}
     </div>
   );
 }

@@ -1,0 +1,12 @@
+- [x] Review the current PacketMind frontend and define the PCAP ingestion contract.
+- [x] Upgrade the project to support authenticated storage, database persistence, and API routes.
+- [x] Create data models for captures, analysis runs, host baselines, and anomaly evidence.
+- [x] Implement secure PCAP upload and asynchronous analysis-run state management.
+- [x] Add a deterministic metadata-analysis pipeline and baseline-learning logic for uploaded captures.
+- [x] Connect the dashboard to capture selection, learning progress, analysis results, and anomaly detail.
+- [ ] Validate upload, learning, replay, empty, and failure states end to end.
+- [ ] Implement deferred PCAP analysis with persisted progress and analysis-state polling.
+- [x] Add analysis failure recovery and retry controls for uploaded captures.
+- [ ] Replace the in-process analysis timer with a durable database-backed analysis job workflow.
+- [ ] Persist and display analysis stages for queued, parsing, baseline learning, anomaly detection, completed, and failed states.
+- [ ] Save a verified checkpoint and deliver the enhanced project.
