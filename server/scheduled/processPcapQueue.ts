@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { getWorkerSettingsByTaskUid } from "../db";
 import { processNextQueuedPcapAnalysis } from "../pcapJobProcessor";
 import { sdk } from "../_core/sdk";
 
@@ -7,6 +8,8 @@ export async function processPcapQueue(req: Request, res: Response) {
   try {
     const user = await sdk.authenticateRequest(req);
     if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+    const worker = await getWorkerSettingsByTaskUid(user.taskUid);
+    if (!worker) return res.status(403).json({ error: "unknown-or-disabled-worker" });
     const result = await processNextQueuedPcapAnalysis();
     return res.json({ ok: true, ...result, taskUid: user.taskUid });
   } catch (error) {

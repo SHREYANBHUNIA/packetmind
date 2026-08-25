@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { AnalysisRun, Capture, InsertUser, NetworkAnomaly, analysisRuns, captures, networkAnomalies, users } from "../drizzle/schema";
+import { AnalysisRun, Capture, InsertUser, NetworkAnomaly, analysisRuns, captures, networkAnomalies, users, workerSettings } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -87,6 +87,13 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getWorkerSettingsByTaskUid(taskUid: string) {
+  const db = await getDb();
+  if (!db) throw new Error("PacketMind database is unavailable.");
+  const rows = await db.select().from(workerSettings).where(and(eq(workerSettings.scheduleCronTaskUid, taskUid), eq(workerSettings.enabled, 1))).limit(1);
+  return rows[0];
 }
 
 function asRecord(value: Record<string, unknown> | null | undefined) { return value ?? {}; }

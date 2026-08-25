@@ -13,4 +13,5 @@
 - [x] Persist the production analysis-worker schedule identifier for future management and recovery.
 - [ ] Resume dashboard polling automatically after a page refresh when a capture is queued or analyzing.
 - [ ] Validate the production processor end to end with a queued capture and persisted stage transitions.
+- [ ] Authorize the scheduled processor against its persisted heartbeat identifier and resolve the production cron callback failure.
 - [ ] Save a verified checkpoint and deliver the enhanced project.
