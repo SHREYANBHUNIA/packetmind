@@ -20,5 +20,5 @@
 - [x] Move PCAP parsing and baseline detection into the authenticated upload transaction to avoid scheduler dependency for this bounded MVP.
 - [x] Save a verified checkpoint and deliver the enhanced project.
 - [x] Audit repository-export contents and deployment configuration.
-- [ ] Create a private GitHub repository and push the PacketMind project.
-- [ ] Verify the GitHub repository and provide GitHub deployment guidance.
+- [x] Create a private GitHub repository and push the PacketMind project.
+- [x] Verify the GitHub repository and provide GitHub deployment guidance.
