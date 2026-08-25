@@ -251,8 +251,8 @@ export default function Home() {
     explanation: item.explanation,
     evidence: item.evidence,
   })), [dashboard?.anomalies]);
-  const displayedAnomalies = actualAnomalies.length ? actualAnomalies : anomalies;
-  const selectedAnomaly = useMemo(() => displayedAnomalies.find((item) => item.id === selectedAnomalyId) ?? displayedAnomalies[0], [displayedAnomalies, selectedAnomalyId]);
+  const displayedAnomalies = actualAnomalies.length ? actualAnomalies : isAuthenticated && !dashboardQuery.isLoading ? [] : anomalies;
+  const selectedAnomaly = useMemo<Anomaly | null>(() => displayedAnomalies.find((item) => item.id === selectedAnomalyId) ?? displayedAnomalies[0] ?? null, [displayedAnomalies, selectedAnomalyId]);
   const formatBytes = (value: number) => value >= 1_000_000_000 ? `${(value / 1_000_000_000).toFixed(2)} GB` : value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)} MB` : value >= 1_000 ? `${(value / 1_000).toFixed(1)} KB` : `${value} B`;
   const totalBytes = Number(liveSummary?.totalBytes ?? 0);
   const totalHosts = Number(liveSummary?.totalHosts ?? 0);
@@ -262,8 +262,9 @@ export default function Home() {
   const stageLabel = analysisStage ? ({ queued: "Queued for analysis", parsing: "Parsing packet headers", learning: "Learning baseline behavior", detecting: "Scoring deviations", complete: "Analysis complete", failed: "Analysis failed" }[analysisStage] ?? "Analyzing capture") : null;
 
   useEffect(() => {
-    setPolling(dashboard?.latest?.run.status === "analyzing");
-  }, [dashboard?.latest?.run.status]);
+    const stage = dashboard?.latest?.run.stage;
+    setPolling(stage === "queued" || stage === "parsing" || stage === "learning" || stage === "detecting");
+  }, [dashboard?.latest?.run.stage]);
 
   const openUpload = () => {
     if (!isAuthenticated) { startLogin(); return; }
@@ -300,7 +301,7 @@ export default function Home() {
 
   const selectHost = (host: string) => {
     setSelectedHost(host);
-    setSelectedAnomalyId(displayedAnomalies.find((item) => item.source === host || item.target.includes(host))?.id ?? displayedAnomalies[0].id);
+    setSelectedAnomalyId(displayedAnomalies.find((item) => item.source === host || item.target.includes(host))?.id ?? selectedAnomalyId);
   };
 
   const toggleCapture = () => {
@@ -394,11 +395,11 @@ export default function Home() {
               <aside id="anomaly-docket" className="instrument-panel enter-stagger overflow-hidden rounded-xl" style={{ animationDelay: "60ms" }}>
                 <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4"><div><div className="mb-1.5 flex gap-2"><span className="panel-label">Anomaly docket</span><span className="measurement-id">Q / 017</span></div><h2 className="text-[14px] font-bold tracking-[-0.03em]">Three deviations need inspection</h2></div><span className="grid h-6 w-6 place-items-center rounded-md border border-white/[0.08] text-[10px] font-semibold text-slate-400">17</span></div>
                 <div className="max-h-[281px] overflow-y-auto scroll-thin">
-                  {displayedAnomalies.map((item) => <button key={item.id} onClick={() => { setSelectedAnomalyId(item.id); setSelectedHost(item.source); }} className={`anomaly-bracket w-full border-b border-white/[0.06] px-5 py-3 text-left transition-colors ${selectedAnomalyId === item.id ? "bg-white/[0.055]" : "hover:bg-white/[0.025]"}`}><div className="flex gap-2.5"><SeverityDot severity={item.severity} /><div className="min-w-0 flex-1"><div className="mb-1 flex items-center justify-between gap-2"><span className="truncate text-[11px] font-semibold text-slate-200">{item.title}</span><span className="font-mono text-[9px] text-slate-500">{item.time}</span></div><div className="flex items-center justify-between gap-3"><span className="truncate font-mono text-[9px] text-slate-500">{item.source}</span><span className="font-mono text-[9px] text-[#f6b73c]">{item.score.toFixed(2)}</span></div></div></div></button>)}
+                  {displayedAnomalies.length ? displayedAnomalies.map((item) => <button key={item.id} onClick={() => { setSelectedAnomalyId(item.id); setSelectedHost(item.source); }} className={`anomaly-bracket w-full border-b border-white/[0.06] px-5 py-3 text-left transition-colors ${selectedAnomalyId === item.id ? "bg-white/[0.055]" : "hover:bg-white/[0.025]"}`}><div className="flex gap-2.5"><SeverityDot severity={item.severity} /><div className="min-w-0 flex-1"><div className="mb-1 flex items-center justify-between gap-2"><span className="truncate text-[11px] font-semibold text-slate-200">{item.title}</span><span className="font-mono text-[9px] text-slate-500">{item.time}</span></div><div className="flex items-center justify-between gap-3"><span className="truncate font-mono text-[9px] text-slate-500">{item.source}</span><span className="font-mono text-[9px] text-[#f6b73c]">{item.score.toFixed(2)}</span></div></div></div></button>) : <div className="px-5 py-7 text-center"><div className="mb-1 font-mono text-[10px] text-slate-500">No detections yet</div><p className="text-[10px] leading-relaxed text-slate-600">Upload a first PCAP to learn communication behavior.</p></div>}
                 </div>
                 <div className="relative overflow-hidden border-t border-white/[0.07] bg-[#12171d] px-5 py-4">
                   <div className="absolute inset-0 bg-cover bg-right opacity-[0.11]" style={{ backgroundImage: "url('/manus-storage/packetmind-telemetry-hero_28b995f3.png')" }} />
-                  <div className="relative"><div className="mb-2 flex items-center gap-2"><Sparkles className="h-3.5 w-3.5 text-[#f6b73c]" /><span className="panel-label text-[#d1a856]">PacketMind explanation</span></div><p className="mb-3 text-[10.5px] leading-relaxed text-slate-400">{selectedAnomaly.explanation}</p><button onClick={() => toast("Evidence trail opened", { description: "The selected event's flow evidence is ready for review." })} className="flex items-center gap-1.5 font-mono text-[10px] text-[#f6b73c] hover:text-[#ffd67c]">Open evidence trail <ArrowUpRight className="h-3 w-3" /></button></div>
+                  <div className="relative"><div className="mb-2 flex items-center gap-2"><Sparkles className="h-3.5 w-3.5 text-[#f6b73c]" /><span className="panel-label text-[#d1a856]">PacketMind explanation</span></div><p className="mb-3 text-[10.5px] leading-relaxed text-slate-400">{selectedAnomaly ? selectedAnomaly.explanation : "PacketMind will attach a plain-language explanation after it learns a capture and scores its communication patterns."}</p>{selectedAnomaly ? <button onClick={() => toast("Evidence trail opened", { description: "The selected event's flow evidence is ready for review." })} className="flex items-center gap-1.5 font-mono text-[10px] text-[#f6b73c] hover:text-[#ffd67c]">Open evidence trail <ArrowUpRight className="h-3 w-3" /></button> : <button onClick={openUpload} className="flex items-center gap-1.5 font-mono text-[10px] text-[#f6b73c] hover:text-[#ffd67c]">Upload first capture <Upload className="h-3 w-3" /></button>}</div>
                 </div>
               </aside>
             </section>

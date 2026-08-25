@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { AnalysisRun, Capture, InsertUser, NetworkAnomaly, analysisRuns, captures, networkAnomalies, users, workerSettings } from "../drizzle/schema";
+import { AnalysisRun, Capture, InsertUser, NetworkAnomaly, analysisRuns, analysisStageEvents, captures, networkAnomalies, users, workerSettings } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -116,6 +116,7 @@ export async function createAnalysisRun(captureId: number, userId: number, basel
   if (!db) throw new Error("PacketMind database is unavailable.");
   const [row] = await db.insert(analysisRuns).values({ captureId, userId, baselineCaptureId, status: "analyzing", stage: "queued", progress: 0 }).$returningId();
   await db.update(captures).set({ status: "analyzing" }).where(eq(captures.id, captureId));
+  await db.insert(analysisStageEvents).values({ analysisId: row.id, stage: "queued", progress: 0 });
   return row.id;
 }
 
@@ -132,7 +133,9 @@ export async function claimNextQueuedAnalysis() {
 export async function updateAnalysisStage(analysisId: number, stage: "queued" | "parsing" | "learning" | "detecting" | "complete" | "failed", progress: number) {
   const db = await getDb();
   if (!db) throw new Error("PacketMind database is unavailable.");
-  await db.update(analysisRuns).set({ stage, progress: Math.max(0, Math.min(100, progress)) }).where(eq(analysisRuns.id, analysisId));
+  const normalizedProgress = Math.max(0, Math.min(100, progress));
+  await db.update(analysisRuns).set({ stage, progress: normalizedProgress }).where(eq(analysisRuns.id, analysisId));
+  await db.insert(analysisStageEvents).values({ analysisId, stage, progress: normalizedProgress });
 }
 
 export async function getCaptureForAnalysis(captureId: number, userId: number) {
@@ -151,6 +154,7 @@ export async function retryAnalysisRun(analysisId: number, userId: number) {
   if (record.run.status !== "failed") throw new Error("Only failed analysis runs can be retried.");
   await db.update(analysisRuns).set({ status: "analyzing", stage: "queued", progress: 0, failureReason: null, completedAt: null }).where(eq(analysisRuns.id, analysisId));
   await db.update(captures).set({ status: "analyzing", completedAt: null }).where(eq(captures.id, record.capture.id));
+  await db.insert(analysisStageEvents).values({ analysisId, stage: "queued", progress: 0 });
   return record;
 }
 
@@ -158,6 +162,7 @@ export async function completeAnalysis(input: { captureId: number; analysisId: n
   const db = await getDb();
   if (!db) throw new Error("PacketMind database is unavailable.");
   await db.update(analysisRuns).set({ status: "ready", stage: "complete", progress: 100, failureReason: null, totalPackets: Number(input.summary.totalPackets ?? 0), totalFlows: Number(input.summary.totalFlows ?? 0), totalHosts: Number(input.summary.totalHosts ?? 0), totalBytes: Number(input.summary.totalBytes ?? 0), summary: input.summary, baselineProfile: input.baselineProfile, completedAt: new Date() }).where(eq(analysisRuns.id, input.analysisId));
+  await db.insert(analysisStageEvents).values({ analysisId: input.analysisId, stage: "complete", progress: 100 });
   await db.update(captures).set({ status: "ready", summary: input.summary, completedAt: new Date() }).where(eq(captures.id, input.captureId));
   if (input.anomalies.length) await db.insert(networkAnomalies).values(input.anomalies.map(anomaly => ({ ...anomaly, analysisId: input.analysisId })));
 }
@@ -166,6 +171,7 @@ export async function failAnalysis(captureId: number, analysisId: number, failur
   const db = await getDb();
   if (!db) return;
   await db.update(analysisRuns).set({ status: "failed", stage: "failed", failureReason, completedAt: new Date() }).where(eq(analysisRuns.id, analysisId));
+  await db.insert(analysisStageEvents).values({ analysisId, stage: "failed", progress: 100 });
   await db.update(captures).set({ status: "failed", completedAt: new Date() }).where(eq(captures.id, captureId));
 }
 
@@ -182,6 +188,7 @@ export async function getNetworkDashboard(userId: number) {
   const latestRows = await db.select({ capture: captures, run: analysisRuns }).from(analysisRuns).innerJoin(captures, eq(analysisRuns.captureId, captures.id)).where(eq(analysisRuns.userId, userId)).orderBy(desc(analysisRuns.createdAt)).limit(1);
   const latest = latestRows[0];
   const anomalies = latest ? await db.select().from(networkAnomalies).where(eq(networkAnomalies.analysisId, latest.run.id)).orderBy(desc(networkAnomalies.score)).limit(24) : [];
+  const stageEvents = latest ? await db.select().from(analysisStageEvents).where(eq(analysisStageEvents.analysisId, latest.run.id)).orderBy(analysisStageEvents.id).limit(12) : [];
   const userCaptures = await db.select().from(captures).where(eq(captures.userId, userId)).orderBy(desc(captures.createdAt)).limit(12);
-  return { latest: latest ? { capture: { ...latest.capture, summary: asRecord(latest.capture.summary) }, run: { ...latest.run, summary: asRecord(latest.run.summary), baselineProfile: asRecord(latest.run.baselineProfile) } } : null, anomalies, captures: userCaptures.map(capture => ({ ...capture, summary: asRecord(capture.summary) })) };
+  return { latest: latest ? { capture: { ...latest.capture, summary: asRecord(latest.capture.summary) }, run: { ...latest.run, summary: asRecord(latest.run.summary), baselineProfile: asRecord(latest.run.baselineProfile) } } : null, anomalies, stageEvents, captures: userCaptures.map(capture => ({ ...capture, summary: asRecord(capture.summary) })) };
 }

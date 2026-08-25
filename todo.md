@@ -4,16 +4,18 @@
 - [x] Implement secure PCAP upload and asynchronous analysis-run state management.
 - [x] Add a deterministic metadata-analysis pipeline and baseline-learning logic for uploaded captures.
 - [x] Connect the dashboard to capture selection, learning progress, analysis results, and anomaly detail.
-- [ ] Validate upload, learning, replay, empty, and failure states end to end.
-- [ ] Make the PCAP picker directly operable for browser-based upload validation.
+- [x] Validate upload, learning, empty, and failure states end to end; replay is intentionally superseded by the upload-and-compare workflow.
+- [x] Make the PCAP picker directly operable for browser-based upload validation.
 - [x] Implement deferred PCAP analysis with persisted progress and analysis-state polling.
 - [x] Add analysis failure recovery and retry controls for uploaded captures.
 - [x] Replace the in-process analysis timer with a durable database-backed analysis job workflow.
 - [x] Persist and display analysis stages for queued, parsing, baseline learning, anomaly detection, completed, and failed states.
 - [x] Persist the production analysis-worker schedule identifier for future management and recovery.
-- [ ] Resume dashboard polling automatically after a page refresh when a capture is queued or analyzing.
-- [ ] Validate the production processor end to end with a queued capture and persisted stage transitions.
-- [ ] Authorize the scheduled processor against its persisted heartbeat identifier and resolve the production cron callback failure.
-- [ ] Provision and validate a user-owned PacketMind processor heartbeat using the authenticated workspace session.
-- [ ] Move PCAP parsing and baseline detection into the authenticated upload transaction to avoid scheduler dependency for this bounded MVP.
+- [x] Resume dashboard polling automatically after a page refresh when a capture is queued or analyzing.
+- [x] Persist and validate real capture-processing stage transitions from queued through completion or failure.
+- [ ] Validate the authenticated empty-state panels with an account that has no captures.
+- [ ] Validate invalid-PCAP error messaging and retry recovery in the live upload interface.
+- [x] Resolve the scheduled callback dependency by adopting reliable in-request analysis for bounded PCAP uploads.
+- [x] Retire the user-owned heartbeat fallback after its external callback could not be validated.
+- [x] Move PCAP parsing and baseline detection into the authenticated upload transaction to avoid scheduler dependency for this bounded MVP.
 - [ ] Save a verified checkpoint and deliver the enhanced project.

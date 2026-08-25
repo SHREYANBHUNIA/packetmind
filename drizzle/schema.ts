@@ -66,6 +66,15 @@ export const analysisRuns = mysqlTable("analysisRuns", {
   completedAt: timestamp("completedAt"),
 });
 
+/** Immutable stage audit trail for explaining progress through an analysis run. */
+export const analysisStageEvents = mysqlTable("analysisStageEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  analysisId: int("analysisId").notNull().references(() => analysisRuns.id),
+  stage: mysqlEnum("stage", analysisStage).notNull(),
+  progress: int("progress").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 /** Individual explainable deviations surfaced by a completed analysis run. */
 export const networkAnomalies = mysqlTable("networkAnomalies", {
   id: int("id").autoincrement().primaryKey(),
