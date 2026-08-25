@@ -22,3 +22,6 @@
 - [x] Audit repository-export contents and deployment configuration.
 - [x] Create a private GitHub repository and push the PacketMind project.
 - [x] Verify the GitHub repository and provide GitHub deployment guidance.
+- [ ] Rewrite all Git commit author and committer metadata with the user-provided identity.
+- [ ] Force-push the rewritten private repository history to GitHub.
+- [ ] Verify the updated GitHub commit attribution.
