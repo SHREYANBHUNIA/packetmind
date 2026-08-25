@@ -18,4 +18,7 @@
 - [x] Resolve the scheduled callback dependency by adopting reliable in-request analysis for bounded PCAP uploads.
 - [x] Retire the user-owned heartbeat fallback after its external callback could not be validated.
 - [x] Move PCAP parsing and baseline detection into the authenticated upload transaction to avoid scheduler dependency for this bounded MVP.
-- [ ] Save a verified checkpoint and deliver the enhanced project.
+- [x] Save a verified checkpoint and deliver the enhanced project.
+- [x] Audit repository-export contents and deployment configuration.
+- [ ] Create a private GitHub repository and push the PacketMind project.
+- [ ] Verify the GitHub repository and provide GitHub deployment guidance.
