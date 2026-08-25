@@ -5,8 +5,11 @@
 - [x] Add a deterministic metadata-analysis pipeline and baseline-learning logic for uploaded captures.
 - [x] Connect the dashboard to capture selection, learning progress, analysis results, and anomaly detail.
 - [ ] Validate upload, learning, replay, empty, and failure states end to end.
-- [ ] Implement deferred PCAP analysis with persisted progress and analysis-state polling.
+- [x] Implement deferred PCAP analysis with persisted progress and analysis-state polling.
 - [x] Add analysis failure recovery and retry controls for uploaded captures.
-- [ ] Replace the in-process analysis timer with a durable database-backed analysis job workflow.
-- [ ] Persist and display analysis stages for queued, parsing, baseline learning, anomaly detection, completed, and failed states.
+- [x] Replace the in-process analysis timer with a durable database-backed analysis job workflow.
+- [x] Persist and display analysis stages for queued, parsing, baseline learning, anomaly detection, completed, and failed states.
+- [x] Persist the production analysis-worker schedule identifier for future management and recovery.
+- [ ] Resume dashboard polling automatically after a page refresh when a capture is queued or analyzing.
+- [ ] Validate the production processor end to end with a queued capture and persisted stage transitions.
 - [ ] Save a verified checkpoint and deliver the enhanced project.

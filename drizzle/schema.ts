@@ -83,6 +83,15 @@ export const networkAnomalies = mysqlTable("networkAnomalies", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/** Project-level ownership record for the durable PCAP processor heartbeat. */
+export const workerSettings = mysqlTable("workerSettings", {
+  id: int("id").autoincrement().primaryKey(),
+  workerName: varchar("workerName", { length: 80 }).notNull().unique(),
+  scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }).notNull(),
+  enabled: int("enabled").notNull().default(1),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export type Capture = typeof captures.$inferSelect;
 export type AnalysisRun = typeof analysisRuns.$inferSelect;
 export type NetworkAnomaly = typeof networkAnomalies.$inferSelect;

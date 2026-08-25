@@ -262,7 +262,7 @@ export default function Home() {
   const stageLabel = analysisStage ? ({ queued: "Queued for analysis", parsing: "Parsing packet headers", learning: "Learning baseline behavior", detecting: "Scoring deviations", complete: "Analysis complete", failed: "Analysis failed" }[analysisStage] ?? "Analyzing capture") : null;
 
   useEffect(() => {
-    if (dashboard?.latest?.run.status && dashboard.latest.run.status !== "analyzing") setPolling(false);
+    setPolling(dashboard?.latest?.run.status === "analyzing");
   }, [dashboard?.latest?.run.status]);
 
   const openUpload = () => {
