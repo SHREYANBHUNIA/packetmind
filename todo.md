@@ -13,8 +13,8 @@
 - [x] Persist the production analysis-worker schedule identifier for future management and recovery.
 - [x] Resume dashboard polling automatically after a page refresh when a capture is queued or analyzing.
 - [x] Persist and validate real capture-processing stage transitions from queued through completion or failure.
-- [ ] Validate the authenticated empty-state panels with an account that has no captures.
-- [ ] Validate invalid-PCAP error messaging and retry recovery in the live upload interface.
+- [x] Validate the authenticated empty-state panels with an account that has no captures.
+- [x] Validate invalid-PCAP error messaging and retry recovery in the live upload interface.
 - [x] Resolve the scheduled callback dependency by adopting reliable in-request analysis for bounded PCAP uploads.
 - [x] Retire the user-owned heartbeat fallback after its external callback could not be validated.
 - [x] Move PCAP parsing and baseline detection into the authenticated upload transaction to avoid scheduler dependency for this bounded MVP.
