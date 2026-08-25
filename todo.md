@@ -15,4 +15,5 @@
 - [ ] Validate the production processor end to end with a queued capture and persisted stage transitions.
 - [ ] Authorize the scheduled processor against its persisted heartbeat identifier and resolve the production cron callback failure.
 - [ ] Provision and validate a user-owned PacketMind processor heartbeat using the authenticated workspace session.
+- [ ] Move PCAP parsing and baseline detection into the authenticated upload transaction to avoid scheduler dependency for this bounded MVP.
 - [ ] Save a verified checkpoint and deliver the enhanced project.

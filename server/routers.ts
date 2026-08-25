@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createHeartbeatJob } from "./_core/heartbeat";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { createAnalysisRun, createCapture, getLatestBaseline, getNetworkDashboard, retryAnalysisRun, setProcessorHeartbeat } from "./db";
+import { processStoredPcapAnalysis } from "./pcapJobProcessor";
 import { storagePut } from "./storage";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -38,11 +39,15 @@ export const appRouter = router({
       const captureId = await createCapture({ userId: ctx.user.id, filename: input.filename, networkLabel: input.networkLabel, storageKey: stored.key, storageUrl: stored.url, byteSize: fileBytes.length, mode: input.mode });
       const learned = input.mode === "compare" ? await getLatestBaseline(ctx.user.id) : undefined;
       const analysisId = await createAnalysisRun(captureId, ctx.user.id, learned?.capture.id);
-      return { captureId, analysisId, status: "queued" as const, baselineUsed: input.mode === "compare" };
+      const outcome = await processStoredPcapAnalysis({ captureId, analysisId, userId: ctx.user.id });
+      if (outcome.failed) throw new TRPCError({ code: "BAD_REQUEST", message: outcome.message });
+      return { captureId, analysisId, status: "ready" as const, baselineUsed: input.mode === "compare", anomalies: outcome.anomalies, summary: outcome.summary };
     }),
     retry: protectedProcedure.input(z.object({ analysisId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const record = await retryAnalysisRun(input.analysisId, ctx.user.id);
-      return { analysisId: record.run.id, status: "queued" as const };
+      const outcome = await processStoredPcapAnalysis({ captureId: record.capture.id, analysisId: record.run.id, userId: ctx.user.id });
+      if (outcome.failed) throw new TRPCError({ code: "BAD_REQUEST", message: outcome.message });
+      return { analysisId: record.run.id, status: "ready" as const, anomalies: outcome.anomalies, summary: outcome.summary };
     }),
     provisionProcessor: protectedProcedure.mutation(async ({ ctx }) => {
       const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";

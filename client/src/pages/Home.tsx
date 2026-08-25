@@ -216,13 +216,13 @@ export default function Home() {
   const uploadMutation = trpc.network.uploadAndAnalyze.useMutation({
     onSuccess: async (result) => {
       await utils.network.dashboard.invalidate();
-      setPolling(true);
-      toast.success(result.baselineUsed ? "Comparison queued" : "Baseline learning queued", { description: "PacketMind is analyzing metadata in the background. This view will update automatically." });
+      setPolling(false);
+      toast.success(result.baselineUsed ? "Comparison complete" : "Baseline learned", { description: `${result.summary.totalFlows} metadata flows analyzed; ${result.anomalies} deviation${result.anomalies === 1 ? "" : "s"} surfaced.` });
     },
     onError: (error) => toast.error("PCAP analysis could not start", { description: error.message }),
   });
   const retryMutation = trpc.network.retry.useMutation({
-    onSuccess: async () => { await utils.network.dashboard.invalidate(); setPolling(true); toast.success("Analysis restarted", { description: "PacketMind is retrying this stored capture." }); },
+    onSuccess: async (result) => { await utils.network.dashboard.invalidate(); setPolling(false); toast.success("Analysis complete", { description: `${result.summary.totalFlows} metadata flows rechecked; ${result.anomalies} deviation${result.anomalies === 1 ? "" : "s"} surfaced.` }); },
     onError: (error) => toast.error("Retry could not start", { description: error.message }),
   });
   const [range, setRange] = useState<Range>("24H");
